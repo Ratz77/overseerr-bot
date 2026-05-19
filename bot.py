@@ -1,3 +1,4 @@
+import asyncio
 import logging
 import httpx
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
@@ -5,6 +6,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 
 import overseerr
 import storage
+import notifier
 from config import TELEGRAM_TOKEN, ALLOWED_USERS
 from overseerr import STATUS_MAP
 
@@ -244,11 +246,16 @@ async def cmd_peticiones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.edit_text("❌ Error al conectar con Overseerr.")
 
 
+async def post_init(app: Application):
+    asyncio.create_task(notifier.run(app))
+    logger.info("Notificador arrancado. Comprobará peticiones cada 12 horas.")
+
+
 def main():
     if not TELEGRAM_TOKEN:
         raise ValueError("TELEGRAM_TOKEN no está configurado en .env")
 
-    app = Application.builder().token(TELEGRAM_TOKEN).build()
+    app = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
     app.add_handler(CommandHandler("start", cmd_start))
     app.add_handler(CommandHandler("vincular", cmd_vincular))
     app.add_handler(CommandHandler("desvincular", cmd_desvincular))

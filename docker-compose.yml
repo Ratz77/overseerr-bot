@@ -10,3 +10,4 @@ services:
       - ./data:/app/data
     environment:
       - USERS_FILE=/app/data/users.json
+      - STATES_FILE=/app/data/states.json
