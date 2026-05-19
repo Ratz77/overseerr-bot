@@ -96,6 +96,18 @@ docker compose logs -f
 
 Para restringir el bot a usuarios concretos mediante `ALLOWED_USERS`, necesitas el ID numérico de Telegram de cada usuario. Se puede obtener hablando con [@userinfobot](https://t.me/userinfobot).
 
+## Resultados de búsqueda
+
+Los botones de búsqueda muestran el estado actual del contenido antes de solicitarlo:
+
+```
+🎬 Interstellar (2014)                        → se puede solicitar
+🎬 Interstellar (2014) · Ya está solicitada   → pendiente de aprobación
+🎬 Interstellar (2014) · Procesando           → descargando
+🎬 Interstellar (2014) · Parcialmente disponible
+🎬 Interstellar (2014) · Disponible en Plex   → ya en Plex
+```
+
 ## Estados de las peticiones
 
 | Estado | Significado |
