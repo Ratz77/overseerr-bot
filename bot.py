@@ -2,7 +2,10 @@ import asyncio
 import logging
 import httpx
 from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
-from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
+from telegram.ext import (
+    Application, CommandHandler, CallbackQueryHandler,
+    ContextTypes, ConversationHandler, MessageHandler, filters,
+)
 
 import overseerr
 import storage
@@ -16,22 +19,12 @@ logging.basicConfig(
 )
 logger = logging.getLogger(__name__)
 
+WAITING_EMAIL = 1
 
 NOT_AUTHORIZED_MSG = (
     "⛔ No estás autorizado para usar este bot.\n\n"
-    "Vincula tu cuenta de Overseerr con:\n`/vincular tu@email.com`"
+    "Vincula tu cuenta de Overseerr con:\n`/vincular`"
 )
-
-
-def is_allowed(user_id: int) -> bool:
-    if not ALLOWED_USERS:
-        return True
-    return str(user_id) in ALLOWED_USERS
-
-
-def is_linked(user_id: int) -> bool:
-    return storage.get_overseerr_id(user_id) is not None
-
 
 MEDIA_STATUS_LABEL = {
     2: "Ya está solicitada",
@@ -51,6 +44,16 @@ ORIGIN_WARNING = {
 }
 
 
+def is_allowed(user_id: int) -> bool:
+    if not ALLOWED_USERS:
+        return True
+    return str(user_id) in ALLOWED_USERS
+
+
+def is_linked(user_id: int) -> bool:
+    return storage.get_overseerr_id(user_id) is not None
+
+
 def get_title(item: dict) -> str:
     return item.get("title") or item.get("name") or "Sin título"
 
@@ -68,7 +71,6 @@ def get_media_status_label(item: dict) -> str:
 def get_origin_key(item: dict) -> str:
     genre_ids = item.get("genreIds") or []
     countries = set(item.get("originCountry") or [])
-
     if SOAP_GENRE_ID in genre_ids:
         return "telenovela"
     if "TR" in countries:
@@ -86,19 +88,25 @@ def get_origin_label(item: dict) -> str:
     return ""
 
 
+def user_display(user) -> str:
+    return f"@{user.username}" if user.username else user.first_name
+
+
+# ── /start ──────────────────────────────────────────────────────────────────
+
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         await update.message.reply_text("No tienes permiso para usar este bot.")
         return
 
     overseerr_id = storage.get_overseerr_id(update.effective_user.id)
-    vinculado = "✅ Vinculado a Overseerr" if overseerr_id else "⚠️ No vinculado — usa `/vincular tu@email.com`"
+    vinculado = "✅ Vinculado a Overseerr" if overseerr_id else "⚠️ No vinculado — usa `/vincular`"
 
     await update.message.reply_text(
         "👋 *Bot de Overseerr*\n\n"
         f"Estado: {vinculado}\n\n"
         "Comandos disponibles:\n"
-        "• `/vincular <email>` — Vincula tu cuenta de Overseerr\n"
+        "• `/vincular` — Vincula tu cuenta de Overseerr\n"
         "• `/buscar <nombre>` — Busca película o serie y solicítala\n"
         "• `/peticiones` — Ver tus peticiones recientes\n"
         "• `/desvincular` — Desvincula tu cuenta de Overseerr\n",
@@ -106,61 +114,112 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+# ── /vincular (ConversationHandler) ─────────────────────────────────────────
+
 async def cmd_vincular(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         await update.message.reply_text("No tienes permiso para usar este bot.")
-        return
+        return ConversationHandler.END
 
-    if not context.args:
+    if is_linked(update.effective_user.id):
         await update.message.reply_text(
-            "Uso: `/vincular tu@email.com`\n\nIntroduce el email con el que estás registrado en Overseerr.",
-            parse_mode="Markdown",
+            "Ya tienes una cuenta vinculada. Usa /desvincular primero si quieres cambiarla."
         )
-        return
+        return ConversationHandler.END
 
-    email = context.args[0].strip()
+    in_group = update.effective_chat.type in ("group", "supergroup")
+
+    if in_group:
+        context.user_data["group_chat_id"] = update.effective_chat.id
+        try:
+            await context.bot.send_message(
+                chat_id=update.effective_user.id,
+                text="🔒 Introduce tu email de Overseerr para vincular tu cuenta:\n\n_Escríbelo aquí, en este chat privado._",
+                parse_mode="Markdown",
+            )
+            await update.message.reply_text(
+                f"{user_display(update.effective_user)}, te he enviado un mensaje privado para completar la vinculación."
+            )
+        except Exception:
+            await update.message.reply_text(
+                f"{user_display(update.effective_user)}, no pude enviarte un mensaje privado.\n"
+                f"Inicia una conversación conmigo primero y luego escribe /vincular."
+            )
+            return ConversationHandler.END
+    else:
+        await update.message.reply_text(
+            "🔒 Introduce tu email de Overseerr para vincular tu cuenta:",
+        )
+
+    return WAITING_EMAIL
+
+
+async def receive_email(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    # Solo atender en chat privado
+    if update.effective_chat.type != "private":
+        return WAITING_EMAIL
+
+    email = update.message.text.strip()
+    user = update.effective_user
     msg = await update.message.reply_text(f"🔍 Buscando cuenta con email *{email}*...", parse_mode="Markdown")
 
     try:
-        user = await overseerr.find_user_by_email(email)
+        overseerr_user = await overseerr.find_user_by_email(email)
 
-        if not user:
+        if not overseerr_user:
             await msg.edit_text(
                 f"❌ No se encontró ningún usuario con el email *{email}* en Overseerr.\n\n"
-                "Asegúrate de que el email es correcto y de que tienes cuenta en Overseerr.",
+                "Asegúrate de que el email es correcto y tienes cuenta en Overseerr.",
                 parse_mode="Markdown",
             )
-            return
+            return ConversationHandler.END
 
-        storage.link_user(update.effective_user.id, user["id"])
-        display = user.get("displayName") or user.get("username") or email
+        storage.link_user(user.id, overseerr_user["id"])
+        display = overseerr_user.get("displayName") or overseerr_user.get("username") or email
 
         await msg.edit_text(
             f"✅ Cuenta vinculada correctamente.\n\n"
-            f"👤 Usuario Overseerr: *{display}*\n"
-            f"📧 Email: *{email}*\n\n"
-            "A partir de ahora tus peticiones se harán en tu nombre.",
+            f"👤 Usuario Overseerr: *{display}*\n\n"
+            "Ya puedes hacer peticiones desde el grupo o aquí en privado.",
             parse_mode="Markdown",
         )
 
+        group_chat_id = context.user_data.pop("group_chat_id", None)
+        if group_chat_id:
+            await context.bot.send_message(
+                chat_id=group_chat_id,
+                text=f"✅ {user_display(user)} ya está vinculado y puede hacer peticiones.",
+            )
+
     except Exception as e:
-        logger.error(f"Error vinculando usuario {email}: {e}")
+        logger.error(f"Error vinculando {email}: {e}")
         await msg.edit_text("❌ Error al conectar con Overseerr. Revisa la configuración.")
 
+    return ConversationHandler.END
+
+
+async def cmd_cancel(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    context.user_data.clear()
+    await update.message.reply_text("Vinculación cancelada.")
+    return ConversationHandler.END
+
+
+# ── /desvincular ─────────────────────────────────────────────────────────────
 
 async def cmd_desvincular(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         await update.message.reply_text("No tienes permiso para usar este bot.")
         return
 
-    overseerr_id = storage.get_overseerr_id(update.effective_user.id)
-    if not overseerr_id:
+    if not is_linked(update.effective_user.id):
         await update.message.reply_text("No tienes ninguna cuenta vinculada.")
         return
 
     storage.unlink_user(update.effective_user.id)
     await update.message.reply_text("✅ Cuenta desvinculada correctamente.")
 
+
+# ── /buscar ──────────────────────────────────────────────────────────────────
 
 async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
@@ -211,6 +270,8 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.edit_text("❌ Error al conectar con Overseerr. Revisa la configuración.")
 
 
+# ── callback petición ────────────────────────────────────────────────────────
+
 async def callback_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
     await query.answer()
@@ -239,7 +300,9 @@ async def callback_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
         status = STATUS_MAP.get(result.get("status", 1), "Desconocido")
         warning_entry = ORIGIN_WARNING.get(origin_key)
         warning = warning_entry[0] if warning_entry and warning_entry[1]() else ""
-        text = f"✅ *{title}* solicitada.\nEstado: {status}"
+
+        requester = user_display(query.from_user)
+        text = f"✅ *{title}* solicitada por {requester}.\nEstado: {status}"
         if warning:
             text += f"\n\n{warning}"
 
@@ -260,6 +323,8 @@ async def callback_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("❌ Error al conectar con Overseerr.")
 
 
+# ── /peticiones ──────────────────────────────────────────────────────────────
+
 async def cmd_peticiones(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if not is_allowed(update.effective_user.id):
         await update.message.reply_text("No tienes permiso para usar este bot.")
@@ -279,8 +344,7 @@ async def cmd_peticiones(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.edit_text("No tienes peticiones recientes.")
             return
 
-        header = "📋 *Tus peticiones:*\n"
-        lines = [header]
+        lines = ["📋 *Tus peticiones:*\n"]
         for req in requests:
             media = req.get("media", {})
             title = media.get("originalTitle") or media.get("originalName") or "Sin título"
@@ -296,6 +360,8 @@ async def cmd_peticiones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await msg.edit_text("❌ Error al conectar con Overseerr.")
 
 
+# ── arranque ─────────────────────────────────────────────────────────────────
+
 async def post_init(app: Application):
     asyncio.create_task(notifier.run(app))
     logger.info("Notificador arrancado. Comprobará peticiones cada 12 horas.")
@@ -306,8 +372,18 @@ def main():
         raise ValueError("TELEGRAM_TOKEN no está configurado en .env")
 
     app = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
+
+    conv_handler = ConversationHandler(
+        entry_points=[CommandHandler("vincular", cmd_vincular)],
+        states={
+            WAITING_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_email)],
+        },
+        fallbacks=[CommandHandler("cancelar", cmd_cancel)],
+        per_chat=False,
+    )
+
+    app.add_handler(conv_handler)
     app.add_handler(CommandHandler("start", cmd_start))
-    app.add_handler(CommandHandler("vincular", cmd_vincular))
     app.add_handler(CommandHandler("desvincular", cmd_desvincular))
     app.add_handler(CommandHandler("buscar", cmd_buscar))
     app.add_handler(CommandHandler("peticiones", cmd_peticiones))
