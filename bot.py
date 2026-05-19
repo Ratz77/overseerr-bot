@@ -40,6 +40,16 @@ MEDIA_STATUS_LABEL = {
     5: "Disponible en Plex",
 }
 
+SOAP_GENRE_ID = 10766
+
+LATIN_COUNTRIES = {"MX", "AR", "CO", "VE", "PE", "CL", "EC", "BO", "PY", "UY", "CR", "PA", "HN", "GT", "SV", "DO", "CU", "PR"}
+
+ORIGIN_WARNING = {
+    "turca":      "⚠️ Esta es una serie turca, es muy probable que la petición sea rechazada.",
+    "latina":     "⚠️ Esta es una serie latina, es muy probable que la petición sea rechazada.",
+    "telenovela": "⚠️ Esta es una telenovela, es muy probable que la petición sea rechazada.",
+}
+
 
 def get_title(item: dict) -> str:
     return item.get("title") or item.get("name") or "Sin título"
@@ -53,6 +63,32 @@ def get_year(item: dict) -> str:
 def get_media_status_label(item: dict) -> str:
     status = (item.get("mediaInfo") or {}).get("status")
     return MEDIA_STATUS_LABEL.get(status, "")
+
+
+def get_origin_label(item: dict) -> str:
+    genre_ids = item.get("genreIds") or []
+    countries = set(item.get("originCountry") or [])
+
+    if SOAP_GENRE_ID in genre_ids:
+        return "Telenovela"
+    if "TR" in countries:
+        return "Serie turca"
+    if countries & LATIN_COUNTRIES:
+        return "Serie latina"
+    return ""
+
+
+def get_origin_key(item: dict) -> str:
+    genre_ids = item.get("genreIds") or []
+    countries = set(item.get("originCountry") or [])
+
+    if SOAP_GENRE_ID in genre_ids:
+        return "telenovela"
+    if "TR" in countries:
+        return "turca"
+    if countries & LATIN_COUNTRIES:
+        return "latina"
+    return "0"
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -161,10 +197,12 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
             year = get_year(item)
             icon = "🎬" if media_type == "movie" else "📺"
             tmdb_id = item.get("id")
+            origin_label = get_origin_label(item)
+            origin_key = get_origin_key(item)
             status_label = get_media_status_label(item)
-            suffix = f" · {status_label}" if status_label else ""
-            label = f"{icon} {title}{year}{suffix}"
-            callback = f"req:{media_type}:{tmdb_id}:{title[:30]}"
+            suffix = " · ".join(filter(None, [origin_label, status_label]))
+            label = f"{icon} {title}{year}" + (f" · {suffix}" if suffix else "")
+            callback = f"req:{media_type}:{tmdb_id}:{origin_key}:{title[:25]}"
             keyboard.append([InlineKeyboardButton(label, callback_data=callback)])
 
         await msg.edit_text(
@@ -190,12 +228,12 @@ async def callback_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text(NOT_AUTHORIZED_MSG, parse_mode="Markdown")
         return
 
-    parts = query.data.split(":", 3)
-    if len(parts) < 4:
+    parts = query.data.split(":", 4)
+    if len(parts) < 5:
         await query.edit_message_text("❌ Datos de solicitud inválidos.")
         return
 
-    _, media_type, media_id_str, title = parts
+    _, media_type, media_id_str, origin_key, title = parts
     media_id = int(media_id_str)
     overseerr_user_id = storage.get_overseerr_id(query.from_user.id)
 
@@ -204,11 +242,12 @@ async def callback_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         result = await overseerr.request_media(media_type, media_id, overseerr_user_id)
         status = STATUS_MAP.get(result.get("status", 1), "Desconocido")
+        warning = ORIGIN_WARNING.get(origin_key, "")
+        text = f"✅ *{title}* solicitada.\nEstado: {status}"
+        if warning:
+            text += f"\n\n{warning}"
 
-        await query.edit_message_text(
-            f"✅ *{title}* solicitada.\nEstado: {status}",
-            parse_mode="Markdown",
-        )
+        await query.edit_message_text(text, parse_mode="Markdown")
 
     except httpx.HTTPStatusError as e:
         if e.response.status_code == 409:
