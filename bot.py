@@ -114,6 +114,20 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
     )
 
 
+async def cmd_start_vincular(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    """Entry point para el deep link /start vincular desde el grupo."""
+    if not is_allowed(update.effective_user.id):
+        await update.message.reply_text("No tienes permiso para usar este bot.")
+        return ConversationHandler.END
+
+    if is_linked(update.effective_user.id):
+        await update.message.reply_text("Ya tienes una cuenta vinculada. Usa /desvincular primero si quieres cambiarla.")
+        return ConversationHandler.END
+
+    await update.message.reply_text("🔒 Introduce tu email de Overseerr para vincular tu cuenta:")
+    return WAITING_EMAIL
+
+
 # ── /vincular (ConversationHandler) ─────────────────────────────────────────
 
 async def cmd_vincular(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -131,21 +145,16 @@ async def cmd_vincular(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     if in_group:
         context.user_data["group_chat_id"] = update.effective_chat.id
-        try:
-            await context.bot.send_message(
-                chat_id=update.effective_user.id,
-                text="🔒 Introduce tu email de Overseerr para vincular tu cuenta:\n\n_Escríbelo aquí, en este chat privado._",
-                parse_mode="Markdown",
-            )
-            await update.message.reply_text(
-                f"{user_display(update.effective_user)}, te he enviado un mensaje privado para completar la vinculación."
-            )
-        except Exception:
-            await update.message.reply_text(
-                f"{user_display(update.effective_user)}, no pude enviarte un mensaje privado.\n"
-                f"Inicia una conversación conmigo primero y luego escribe /vincular."
-            )
-            return ConversationHandler.END
+        bot_username = (await context.bot.get_me()).username
+        deep_link = f"https://t.me/{bot_username}?start=vincular"
+        keyboard = InlineKeyboardMarkup([[
+            InlineKeyboardButton("🔒 Vincular en privado", url=deep_link)
+        ]])
+        await update.message.reply_text(
+            f"{user_display(update.effective_user)}, pulsa el botón para vincular tu cuenta de Overseerr en privado.",
+            reply_markup=keyboard,
+        )
+        return ConversationHandler.END
     else:
         await update.message.reply_text(
             "🔒 Introduce tu email de Overseerr para vincular tu cuenta:",
@@ -374,9 +383,15 @@ def main():
     app = Application.builder().token(TELEGRAM_TOKEN).post_init(post_init).build()
 
     conv_handler = ConversationHandler(
-        entry_points=[CommandHandler("vincular", cmd_vincular)],
+        entry_points=[
+            CommandHandler("vincular", cmd_vincular),
+            MessageHandler(
+                filters.ChatType.PRIVATE & filters.Regex(r"^/start vincular"),
+                cmd_start_vincular,
+            ),
+        ],
         states={
-            WAITING_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND, receive_email)],
+            WAITING_EMAIL: [MessageHandler(filters.TEXT & ~filters.COMMAND & filters.ChatType.PRIVATE, receive_email)],
         },
         fallbacks=[CommandHandler("cancelar", cmd_cancel)],
         per_chat=False,
