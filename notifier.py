@@ -3,11 +3,12 @@ import logging
 
 import overseerr
 import storage
+from config import POLL_INTERVAL_HOURS
 from overseerr import STATUS_MAP
 
 logger = logging.getLogger(__name__)
 
-POLL_INTERVAL = 12 * 3600  # 12 horas en segundos
+POLL_INTERVAL = POLL_INTERVAL_HOURS * 3600
 
 NOTIFY_STATUSES = {2, 3, 4, 5}  # estados que generan notificación
 
