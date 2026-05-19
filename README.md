@@ -1,6 +1,10 @@
 # 🎬 Overseerr Telegram Bot
 
-Bot de Telegram para solicitar películas y series en [Overseerr](https://overseerr.dev) sin necesidad de abrir la plataforma. Funciona tanto en chats privados como en grupos.
+Bot de Telegram para gestionar peticiones de películas y series en [Overseerr](https://overseerr.dev) directamente desde Telegram, sin necesidad de abrir la plataforma.
+
+Cada usuario se vincula a su propia cuenta de Overseerr mediante su email, de forma que las peticiones quedan registradas en su nombre. El bot funciona tanto en chats privados como en grupos, manteniendo el email siempre privado y fuera de la conversación del grupo.
+
+Incluye notificaciones automáticas cuando el estado de una petición cambia — aprobada, disponible, rechazada — y detecta automáticamente contenido de origen turco, latino o telenovelas para avisar al usuario antes de que la petición sea rechazada.
 
 ---
 
