@@ -7,7 +7,7 @@ from telegram.ext import Application, CommandHandler, CallbackQueryHandler, Cont
 import overseerr
 import storage
 import notifier
-from config import TELEGRAM_TOKEN, ALLOWED_USERS
+from config import TELEGRAM_TOKEN, ALLOWED_USERS, WARN_TURKISH, WARN_LATIN, WARN_TELENOVELA
 from overseerr import STATUS_MAP
 
 logging.basicConfig(
@@ -45,9 +45,9 @@ SOAP_GENRE_ID = 10766
 LATIN_COUNTRIES = {"MX", "AR", "CO", "VE", "PE", "CL", "EC", "BO", "PY", "UY", "CR", "PA", "HN", "GT", "SV", "DO", "CU", "PR"}
 
 ORIGIN_WARNING = {
-    "turca":      "⚠️ Esta es una serie turca, es muy probable que la petición sea rechazada.",
-    "latina":     "⚠️ Esta es una serie latina, es muy probable que la petición sea rechazada.",
-    "telenovela": "⚠️ Esta es una telenovela, es muy probable que la petición sea rechazada.",
+    "turca":      ("⚠️ Esta es una serie turca, es muy probable que la petición sea rechazada.",      lambda: WARN_TURKISH),
+    "latina":     ("⚠️ Esta es una serie latina, es muy probable que la petición sea rechazada.",     lambda: WARN_LATIN),
+    "telenovela": ("⚠️ Esta es una telenovela, es muy probable que la petición sea rechazada.",       lambda: WARN_TELENOVELA),
 }
 
 
@@ -65,19 +65,6 @@ def get_media_status_label(item: dict) -> str:
     return MEDIA_STATUS_LABEL.get(status, "")
 
 
-def get_origin_label(item: dict) -> str:
-    genre_ids = item.get("genreIds") or []
-    countries = set(item.get("originCountry") or [])
-
-    if SOAP_GENRE_ID in genre_ids:
-        return "Telenovela"
-    if "TR" in countries:
-        return "Serie turca"
-    if countries & LATIN_COUNTRIES:
-        return "Serie latina"
-    return ""
-
-
 def get_origin_key(item: dict) -> str:
     genre_ids = item.get("genreIds") or []
     countries = set(item.get("originCountry") or [])
@@ -89,6 +76,14 @@ def get_origin_key(item: dict) -> str:
     if countries & LATIN_COUNTRIES:
         return "latina"
     return "0"
+
+
+def get_origin_label(item: dict) -> str:
+    key = get_origin_key(item)
+    entry = ORIGIN_WARNING.get(key)
+    if entry and entry[1]():
+        return {"turca": "Serie turca", "latina": "Serie latina", "telenovela": "Telenovela"}.get(key, "")
+    return ""
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -242,7 +237,8 @@ async def callback_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         result = await overseerr.request_media(media_type, media_id, overseerr_user_id)
         status = STATUS_MAP.get(result.get("status", 1), "Desconocido")
-        warning = ORIGIN_WARNING.get(origin_key, "")
+        warning_entry = ORIGIN_WARNING.get(origin_key)
+        warning = warning_entry[0] if warning_entry and warning_entry[1]() else ""
         text = f"✅ *{title}* solicitada.\nEstado: {status}"
         if warning:
             text += f"\n\n{warning}"
