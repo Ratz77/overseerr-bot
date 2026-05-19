@@ -15,10 +15,20 @@ logging.basicConfig(
 logger = logging.getLogger(__name__)
 
 
+NOT_AUTHORIZED_MSG = (
+    "⛔ No estás autorizado para usar este bot.\n\n"
+    "Vincula tu cuenta de Overseerr con:\n`/vincular tu@email.com`"
+)
+
+
 def is_allowed(user_id: int) -> bool:
     if not ALLOWED_USERS:
         return True
     return str(user_id) in ALLOWED_USERS
+
+
+def is_linked(user_id: int) -> bool:
+    return storage.get_overseerr_id(user_id) is not None
 
 
 def get_title(item: dict) -> str:
@@ -111,6 +121,10 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No tienes permiso para usar este bot.")
         return
 
+    if not is_linked(update.effective_user.id):
+        await update.message.reply_text(NOT_AUTHORIZED_MSG, parse_mode="Markdown")
+        return
+
     if not context.args:
         await update.message.reply_text("Uso: `/buscar <nombre>`", parse_mode="Markdown")
         return
@@ -136,11 +150,8 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
             callback = f"req:{media_type}:{tmdb_id}:{title[:30]}"
             keyboard.append([InlineKeyboardButton(label, callback_data=callback)])
 
-        overseerr_id = storage.get_overseerr_id(update.effective_user.id)
-        nota = "" if overseerr_id else "\n\n_⚠️ No vinculado: la petición se hará como invitado. Usa /vincular para asociar tu cuenta._"
-
         await msg.edit_text(
-            f"Resultados para *{query}*:\n_Pulsa para solicitar:_{nota}",
+            f"Resultados para *{query}*:\n_Pulsa para solicitar:_",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown",
         )
@@ -158,6 +169,10 @@ async def callback_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await query.edit_message_text("No tienes permiso.")
         return
 
+    if not is_linked(query.from_user.id):
+        await query.edit_message_text(NOT_AUTHORIZED_MSG, parse_mode="Markdown")
+        return
+
     parts = query.data.split(":", 3)
     if len(parts) < 4:
         await query.edit_message_text("❌ Datos de solicitud inválidos.")
@@ -172,10 +187,9 @@ async def callback_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
     try:
         result = await overseerr.request_media(media_type, media_id, overseerr_user_id)
         status = STATUS_MAP.get(result.get("status", 1), "Desconocido")
-        en_nombre = " (en tu nombre)" if overseerr_user_id else " (como invitado)"
 
         await query.edit_message_text(
-            f"✅ *{title}* solicitada{en_nombre}.\nEstado: {status}",
+            f"✅ *{title}* solicitada.\nEstado: {status}",
             parse_mode="Markdown",
         )
 
@@ -199,6 +213,10 @@ async def cmd_peticiones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No tienes permiso para usar este bot.")
         return
 
+    if not is_linked(update.effective_user.id):
+        await update.message.reply_text(NOT_AUTHORIZED_MSG, parse_mode="Markdown")
+        return
+
     overseerr_user_id = storage.get_overseerr_id(update.effective_user.id)
     msg = await update.message.reply_text("⏳ Cargando peticiones...")
 
@@ -209,7 +227,7 @@ async def cmd_peticiones(update: Update, context: ContextTypes.DEFAULT_TYPE):
             await msg.edit_text("No tienes peticiones recientes.")
             return
 
-        header = "📋 *Tus peticiones:*\n" if overseerr_user_id else "📋 *Peticiones recientes:*\n"
+        header = "📋 *Tus peticiones:*\n"
         lines = [header]
         for req in requests:
             media = req.get("media", {})
