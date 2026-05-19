@@ -1,0 +1,8 @@
+services:
+  overseerr-bot:
+    build: .
+    container_name: overseerr-bot
+    restart: unless-stopped
+    env_file:
+      - .env
+    network_mode: host
