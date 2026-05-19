@@ -6,3 +6,7 @@ services:
     env_file:
       - .env
     network_mode: host
+    volumes:
+      - ./data:/app/data
+    environment:
+      - USERS_FILE=/app/data/users.json

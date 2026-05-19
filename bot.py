@@ -4,6 +4,7 @@ from telegram import Update, InlineKeyboardButton, InlineKeyboardMarkup
 from telegram.ext import Application, CommandHandler, CallbackQueryHandler, ContextTypes
 
 import overseerr
+import storage
 from config import TELEGRAM_TOKEN, ALLOWED_USERS
 from overseerr import STATUS_MAP
 
@@ -34,13 +35,75 @@ async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No tienes permiso para usar este bot.")
         return
 
+    overseerr_id = storage.get_overseerr_id(update.effective_user.id)
+    vinculado = "✅ Vinculado a Overseerr" if overseerr_id else "⚠️ No vinculado — usa `/vincular tu@email.com`"
+
     await update.message.reply_text(
         "👋 *Bot de Overseerr*\n\n"
+        f"Estado: {vinculado}\n\n"
         "Comandos disponibles:\n"
+        "• `/vincular <email>` — Vincula tu cuenta de Overseerr\n"
         "• `/buscar <nombre>` — Busca película o serie y solicítala\n"
-        "• `/peticiones` — Ver las peticiones recientes\n",
+        "• `/peticiones` — Ver tus peticiones recientes\n"
+        "• `/desvincular` — Desvincula tu cuenta de Overseerr\n",
         parse_mode="Markdown",
     )
+
+
+async def cmd_vincular(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_allowed(update.effective_user.id):
+        await update.message.reply_text("No tienes permiso para usar este bot.")
+        return
+
+    if not context.args:
+        await update.message.reply_text(
+            "Uso: `/vincular tu@email.com`\n\nIntroduce el email con el que estás registrado en Overseerr.",
+            parse_mode="Markdown",
+        )
+        return
+
+    email = context.args[0].strip()
+    msg = await update.message.reply_text(f"🔍 Buscando cuenta con email *{email}*...", parse_mode="Markdown")
+
+    try:
+        user = await overseerr.find_user_by_email(email)
+
+        if not user:
+            await msg.edit_text(
+                f"❌ No se encontró ningún usuario con el email *{email}* en Overseerr.\n\n"
+                "Asegúrate de que el email es correcto y de que tienes cuenta en Overseerr.",
+                parse_mode="Markdown",
+            )
+            return
+
+        storage.link_user(update.effective_user.id, user["id"])
+        display = user.get("displayName") or user.get("username") or email
+
+        await msg.edit_text(
+            f"✅ Cuenta vinculada correctamente.\n\n"
+            f"👤 Usuario Overseerr: *{display}*\n"
+            f"📧 Email: *{email}*\n\n"
+            "A partir de ahora tus peticiones se harán en tu nombre.",
+            parse_mode="Markdown",
+        )
+
+    except Exception as e:
+        logger.error(f"Error vinculando usuario {email}: {e}")
+        await msg.edit_text("❌ Error al conectar con Overseerr. Revisa la configuración.")
+
+
+async def cmd_desvincular(update: Update, context: ContextTypes.DEFAULT_TYPE):
+    if not is_allowed(update.effective_user.id):
+        await update.message.reply_text("No tienes permiso para usar este bot.")
+        return
+
+    overseerr_id = storage.get_overseerr_id(update.effective_user.id)
+    if not overseerr_id:
+        await update.message.reply_text("No tienes ninguna cuenta vinculada.")
+        return
+
+    storage.unlink_user(update.effective_user.id)
+    await update.message.reply_text("✅ Cuenta desvinculada correctamente.")
 
 
 async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -73,8 +136,11 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
             callback = f"req:{media_type}:{tmdb_id}:{title[:30]}"
             keyboard.append([InlineKeyboardButton(label, callback_data=callback)])
 
+        overseerr_id = storage.get_overseerr_id(update.effective_user.id)
+        nota = "" if overseerr_id else "\n\n_⚠️ No vinculado: la petición se hará como invitado. Usa /vincular para asociar tu cuenta._"
+
         await msg.edit_text(
-            f"Resultados para *{query}*:\n_Pulsa para solicitar:_",
+            f"Resultados para *{query}*:\n_Pulsa para solicitar:_{nota}",
             reply_markup=InlineKeyboardMarkup(keyboard),
             parse_mode="Markdown",
         )
@@ -99,14 +165,17 @@ async def callback_request(update: Update, context: ContextTypes.DEFAULT_TYPE):
 
     _, media_type, media_id_str, title = parts
     media_id = int(media_id_str)
+    overseerr_user_id = storage.get_overseerr_id(query.from_user.id)
 
     await query.edit_message_text(f"⏳ Solicitando *{title}*...", parse_mode="Markdown")
 
     try:
-        result = await overseerr.request_media(media_type, media_id)
+        result = await overseerr.request_media(media_type, media_id, overseerr_user_id)
         status = STATUS_MAP.get(result.get("status", 1), "Desconocido")
+        en_nombre = " (en tu nombre)" if overseerr_user_id else " (como invitado)"
+
         await query.edit_message_text(
-            f"✅ *{title}* solicitada.\nEstado: {status}",
+            f"✅ *{title}* solicitada{en_nombre}.\nEstado: {status}",
             parse_mode="Markdown",
         )
 
@@ -130,16 +199,18 @@ async def cmd_peticiones(update: Update, context: ContextTypes.DEFAULT_TYPE):
         await update.message.reply_text("No tienes permiso para usar este bot.")
         return
 
+    overseerr_user_id = storage.get_overseerr_id(update.effective_user.id)
     msg = await update.message.reply_text("⏳ Cargando peticiones...")
 
     try:
-        requests = await overseerr.get_requests()
+        requests = await overseerr.get_requests(overseerr_user_id=overseerr_user_id)
 
         if not requests:
-            await msg.edit_text("No hay peticiones recientes.")
+            await msg.edit_text("No tienes peticiones recientes.")
             return
 
-        lines = ["📋 *Peticiones recientes:*\n"]
+        header = "📋 *Tus peticiones:*\n" if overseerr_user_id else "📋 *Peticiones recientes:*\n"
+        lines = [header]
         for req in requests:
             media = req.get("media", {})
             title = media.get("originalTitle") or media.get("originalName") or "Sin título"
@@ -161,6 +232,8 @@ def main():
 
     app = Application.builder().token(TELEGRAM_TOKEN).build()
     app.add_handler(CommandHandler("start", cmd_start))
+    app.add_handler(CommandHandler("vincular", cmd_vincular))
+    app.add_handler(CommandHandler("desvincular", cmd_desvincular))
     app.add_handler(CommandHandler("buscar", cmd_buscar))
     app.add_handler(CommandHandler("peticiones", cmd_peticiones))
     app.add_handler(CallbackQueryHandler(callback_request, pattern=r"^req:"))
