@@ -25,6 +25,19 @@ Solo los usuarios vinculados a una cuenta de Overseerr pueden usar el bot.
 
 Si el email no existe en Overseerr, el bot rechaza la vinculación y el usuario no puede hacer búsquedas ni peticiones.
 
+## Notificaciones automáticas
+
+El bot comprueba periódicamente el estado de las peticiones y notifica al usuario cuando cambia:
+
+| Cambio | Notificación |
+|---|---|
+| Aprobada | ✅ Tu petición de *Interstellar* ha sido aprobada. |
+| Disponible | 🟢 *Interstellar* ya está disponible. |
+| Rechazada | ❌ Tu petición de *Interstellar* ha sido rechazada. |
+| Procesando | 🔄 *Interstellar* está siendo procesada. |
+
+El intervalo de consulta se configura con `POLL_INTERVAL_HOURS` (por defecto 12 horas).
+
 ## Requisitos
 
 - Docker y Docker Compose
@@ -62,6 +75,9 @@ OVERSEERR_API_KEY=tu_api_key_aqui
 # Opcional: IDs de Telegram separados por coma que pueden usar el bot
 # Si se deja vacío, cualquier usuario puede intentar vincularse
 ALLOWED_USERS=123456789,987654321
+
+# Intervalo en horas para comprobar cambios en las peticiones (por defecto 12)
+POLL_INTERVAL_HOURS=12
 ```
 
 ### 3. Arranca con Docker
@@ -96,7 +112,8 @@ Para restringir el bot a usuarios concretos mediante `ALLOWED_USERS`, necesitas 
 overseerr-bot/
 ├── bot.py           # Lógica del bot y comandos
 ├── overseerr.py     # Cliente de la API de Overseerr
-├── storage.py       # Gestión del mapeo Telegram ↔ Overseerr (users.json)
+├── notifier.py      # Notificador de cambios de estado (poller)
+├── storage.py       # Gestión de usuarios y estados (users.json, states.json)
 ├── config.py        # Carga de variables de entorno
 ├── .env.example     # Plantilla de configuración
 ├── Dockerfile
