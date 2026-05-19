@@ -34,10 +34,10 @@ def is_linked(user_id: int) -> bool:
 
 
 MEDIA_STATUS_LABEL = {
-    2: "Pendiente",
+    2: "Ya está solicitada",
     3: "Procesando",
     4: "Parcialmente disponible",
-    5: "Disponible",
+    5: "Disponible en Plex",
 }
 
 
