@@ -6,9 +6,24 @@ Bot de Telegram para solicitar películas y series en [Overseerr](https://overse
 
 | Comando | Descripción |
 |---|---|
-| `/start` | Muestra la ayuda y comandos disponibles |
-| `/buscar <nombre>` | Busca una película o serie y la solicita con un solo click |
-| `/peticiones` | Lista las últimas peticiones y su estado |
+| `/start` | Muestra el estado de tu cuenta y los comandos disponibles |
+| `/vincular <email>` | Vincula tu cuenta de Overseerr por email |
+| `/desvincular` | Desvincula tu cuenta de Overseerr |
+| `/buscar <nombre>` | Busca una película o serie y solicítala con un solo click |
+| `/peticiones` | Ver tus peticiones y su estado |
+
+## Autorización
+
+Solo los usuarios vinculados a una cuenta de Overseerr pueden usar el bot.
+
+```
+/vincular juan@ejemplo.com  →  ✅ Vinculado como "Juan"
+/buscar Interstellar         →  🎬 Resultados con botón de solicitud
+[click en resultado]         →  ✅ Solicitada en tu nombre
+/peticiones                  →  📋 Tus peticiones y su estado
+```
+
+Si el email no existe en Overseerr, el bot rechaza la vinculación y el usuario no puede hacer búsquedas ni peticiones.
 
 ## Requisitos
 
@@ -45,7 +60,7 @@ OVERSEERR_URL=http://192.168.1.10:5055
 OVERSEERR_API_KEY=tu_api_key_aqui
 
 # Opcional: IDs de Telegram separados por coma que pueden usar el bot
-# Si se deja vacío, cualquier usuario puede usarlo
+# Si se deja vacío, cualquier usuario puede intentar vincularse
 ALLOWED_USERS=123456789,987654321
 ```
 
@@ -63,7 +78,7 @@ docker compose logs -f
 
 ## Obtener tu ID de Telegram
 
-Para restringir el bot a usuarios concretos, necesitas tu ID numérico de Telegram. Puedes obtenerlo hablando con [@userinfobot](https://t.me/userinfobot).
+Para restringir el bot a usuarios concretos mediante `ALLOWED_USERS`, necesitas el ID numérico de Telegram de cada usuario. Se puede obtener hablando con [@userinfobot](https://t.me/userinfobot).
 
 ## Estados de las peticiones
 
@@ -74,6 +89,19 @@ Para restringir el bot a usuarios concretos, necesitas tu ID numérico de Telegr
 | 🔄 Procesando | Siendo procesada |
 | 🟢 Disponible | Ya disponible para ver |
 | ❌ Rechazada | Rechazada por el administrador |
+
+## Estructura del proyecto
+
+```
+overseerr-bot/
+├── bot.py           # Lógica del bot y comandos
+├── overseerr.py     # Cliente de la API de Overseerr
+├── storage.py       # Gestión del mapeo Telegram ↔ Overseerr (users.json)
+├── config.py        # Carga de variables de entorno
+├── .env.example     # Plantilla de configuración
+├── Dockerfile
+└── docker-compose.yml
+```
 
 ## Tecnologías
 
