@@ -33,6 +33,14 @@ def is_linked(user_id: int) -> bool:
     return storage.get_overseerr_id(user_id) is not None
 
 
+MEDIA_STATUS_LABEL = {
+    2: "Pendiente",
+    3: "Procesando",
+    4: "Parcialmente disponible",
+    5: "Disponible",
+}
+
+
 def get_title(item: dict) -> str:
     return item.get("title") or item.get("name") or "Sin título"
 
@@ -40,6 +48,11 @@ def get_title(item: dict) -> str:
 def get_year(item: dict) -> str:
     date = item.get("releaseDate") or item.get("firstAirDate") or ""
     return f" ({date[:4]})" if date else ""
+
+
+def get_media_status_label(item: dict) -> str:
+    status = (item.get("mediaInfo") or {}).get("status")
+    return MEDIA_STATUS_LABEL.get(status, "")
 
 
 async def cmd_start(update: Update, context: ContextTypes.DEFAULT_TYPE):
@@ -148,7 +161,9 @@ async def cmd_buscar(update: Update, context: ContextTypes.DEFAULT_TYPE):
             year = get_year(item)
             icon = "🎬" if media_type == "movie" else "📺"
             tmdb_id = item.get("id")
-            label = f"{icon} {title}{year}"
+            status_label = get_media_status_label(item)
+            suffix = f" · {status_label}" if status_label else ""
+            label = f"{icon} {title}{year}{suffix}"
             callback = f"req:{media_type}:{tmdb_id}:{title[:30]}"
             keyboard.append([InlineKeyboardButton(label, callback_data=callback)])
 
